@@ -395,6 +395,41 @@
             }
         }
 
+        .confirm-panel {
+            margin-top: 15px;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            text-align: center;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        .confirm-panel .control-btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 10px;
+            font-family: 'Noto Sans SC', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .confirm-panel .control-btn-primary {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+        }
+
+        .confirm-panel .control-btn-secondary {
+            background: #f0f0f0;
+            color: #666;
+        }
+
+        .preview-stone {
+            animation: pulse 0.8s infinite;
+        }
+
         @media (max-width: 480px) {
             .game-title {
                 font-size: 1.8rem;
@@ -506,6 +541,14 @@
         <div class="board-container">
             <canvas id="board"></canvas>
         </div>
+        <!-- 落子确认区域 -->
+        <div id="confirmPanel" class="confirm-panel hidden">
+            <div style="margin-bottom: 10px; color: #666;">确认在此处落子？</div>
+            <div style="display: flex; gap: 10px;">
+                <button class="control-btn control-btn-secondary" onclick="cancelPlace()">取消</button>
+                <button class="control-btn control-btn-primary" onclick="confirmPlace()">落子</button>
+            </div>
+        </div>
         <div class="game-controls">
             <button class="control-btn control-btn-back" id="backBtn" onclick="backFromGame()">返回</button>
             <button class="control-btn control-btn-restart" id="restartBtn" onclick="restartGame()">重来</button>
@@ -541,6 +584,11 @@
         let aiLevel = 1;
         let gameOver = false;
         let canvas, ctx;
+        
+        // 落子确认相关
+        let previewRow = null;
+        let previewCol = null;
+        let isConfirming = false;
 
         // ========== 联机全局变量 ==========
         let socket = null;
@@ -928,6 +976,12 @@
             currentPlayer = 1;
             gameOver = false;
             
+            // 重置确认状态
+            previewRow = null;
+            previewCol = null;
+            isConfirming = false;
+            document.getElementById('confirmPanel').classList.add('hidden');
+            
             showScreen('gameScreen');
             document.getElementById('gameScreen').style.display = 'flex';
             document.getElementById('resultModal').style.display = 'none';
@@ -961,6 +1015,7 @@
             if (gameOver) return;
             if (gameMode === 'ai' && currentPlayer === 2) return;
             if (isOnline && !isMyTurn) return;
+            if (isConfirming) return;  // 正在确认时不能再次点击
             
             const rect = canvas.getBoundingClientRect();
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -972,12 +1027,34 @@
             const row = Math.round((y - PADDING) / CELL_SIZE);
             
             if (row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE && board[row][col] === 0) {
-                if (isOnline) {
-                    socket.emit('placeStone', { row, col });
-                } else {
-                    placeStone(row, col);
-                }
+                // 显示预览和确认按钮
+                previewRow = row;
+                previewCol = col;
+                isConfirming = true;
+                drawBoard();
+                document.getElementById('confirmPanel').classList.remove('hidden');
             }
+        }
+
+        function confirmPlace() {
+            if (!isConfirming || previewRow === null) return;
+            
+            if (isOnline) {
+                socket.emit('placeStone', { row: previewRow, col: previewCol });
+            } else {
+                placeStone(previewRow, previewCol);
+            }
+            
+            // 重置确认状态
+            cancelPlace();
+        }
+
+        function cancelPlace() {
+            previewRow = null;
+            previewCol = null;
+            isConfirming = false;
+            document.getElementById('confirmPanel').classList.add('hidden');
+            drawBoard();
         }
 
         function placeStone(row, col) {
@@ -1143,6 +1220,65 @@
                     }
                 }
             }
+            
+            // 绘制预览棋子
+            if (isConfirming && previewRow !== null && previewCol !== null) {
+                drawPreviewStone(previewRow, previewCol, currentPlayer);
+            }
+        }
+
+        function drawPreviewStone(row, col, player) {
+            const x = PADDING + col * CELL_SIZE;
+            const y = PADDING + row * CELL_SIZE;
+            
+            // 保存当前状态
+            ctx.save();
+            
+            // 半透明效果
+            ctx.globalAlpha = 0.6;
+            
+            // 启用抗锯齿
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            
+            // 绘制棋子
+            if (player === 1) {
+                const gradient = ctx.createRadialGradient(
+                    x - STONE_RADIUS * 0.3, 
+                    y - STONE_RADIUS * 0.3, 
+                    STONE_RADIUS * 0.1, 
+                    x, y, STONE_RADIUS
+                );
+                gradient.addColorStop(0, '#666');
+                gradient.addColorStop(0.5, '#222');
+                gradient.addColorStop(1, '#000');
+                ctx.fillStyle = gradient;
+            } else {
+                const gradient = ctx.createRadialGradient(
+                    x - STONE_RADIUS * 0.3, 
+                    y - STONE_RADIUS * 0.3, 
+                    STONE_RADIUS * 0.1, 
+                    x, y, STONE_RADIUS
+                );
+                gradient.addColorStop(0, '#fff');
+                gradient.addColorStop(0.7, '#eee');
+                gradient.addColorStop(1, '#bbb');
+                ctx.fillStyle = gradient;
+            }
+            
+            ctx.beginPath();
+            ctx.arc(x, y, STONE_RADIUS, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 边缘高光
+            ctx.beginPath();
+            ctx.arc(x, y, STONE_RADIUS - 0.5, 0, Math.PI * 2);
+            ctx.strokeStyle = player === 1 ? 'rgba(80,80,80,0.6)' : 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            
+            // 恢复状态
+            ctx.restore();
         }
 
         function drawStone(row, col, player) {
